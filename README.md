@@ -1,3 +1,41 @@
+## 🆕 更新说明
+用伟大的opus改了一下
+- 新增了API支持
+- 优化了视频转写和笔记生成逻辑
+- 更新了PROMPT
+- 修复了几个bug
+
+## ⚡ 一键启动（推荐）
+
+### 本地启动
+```bash
+# Windows
+start-local.bat
+
+# Linux / macOS
+chmod +x start-local.sh && ./start-local.sh
+```
+
+### Docker 启动
+```bash
+# Windows
+:: 默认启动
+start-docker.bat
+
+:: 强制重新构建镜像
+start-docker.bat --build
+
+:: 跳过 GPU 检测，直接使用 CPU 模式
+start-docker.bat --cpu
+
+# Linux / macOS
+chmod +x start-docker.sh && ./start-docker.sh
+```
+
+> 📌 脚本会自动检测 Python、Node.js、GPU 环境，并创建默认 `.env` 配置文件。启动成功后自动打开浏览器访问。
+
+-----------------------------------------
+
 <div style="display: flex; justify-content: center; align-items: center; gap: 10px;
 ">
     <p align="center">
@@ -75,7 +113,7 @@ python main.py
 ### 3. 启动前端（Vite + React）
 
 ```bash
-cd BillNote_frontend
+cd BiliNote_frontend
 pnpm install
 pnpm dev
 ```

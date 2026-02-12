@@ -308,14 +308,27 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-/backend/data/*
-/backend/static/*
-/backend/note_tasks.db
-/backend/bin/
-/backend/logs/
-/backend/note_results
-/backend/models
-/backend/.idea/*
-/backend/bili_note.db
-/backend/uploads/*
-/BiliNote_frontend/.idea/*
+# Backend large directories (MUST exclude for Docker build)
+**/venv/
+**/venv/**
+backend/venv/
+backend/venv/**
+backend/models/
+backend/models/**
+backend/data/
+backend/data/**
+backend/static/
+backend/static/**
+backend/note_results/
+backend/note_results/**
+backend/uploads/
+backend/uploads/**
+backend/logs/
+backend/logs/**
+backend/bin/
+backend/*.db
+backend/.idea/
+
+# Frontend
+BiliNote_frontend/node_modules/
+BiliNote_frontend/.idea/

@@ -113,15 +113,40 @@ class DouyinDownloader(Downloader):
     def __init__(self, cookie=None):
         super().__init__()
         self.headers_config = DouyinConfig.HEADERS.copy()
-        self.headers_config["Cookie"] = cfm.get('douyin')
+        raw_cookie = cfm.get('douyin')
+        self.headers_config["Cookie"] = self._convert_cookie_format(raw_cookie)
         print(self.headers_config)
         self.proxies_config = DouyinConfig.PROXIES.copy()
         self.ttwid_config = DouyinConfig.TTWID.copy()
         self.ms_token_config = DouyinConfig.MS_TOKEN.copy()
 
     @staticmethod
+    def _convert_cookie_format(cookie_str: str) -> Optional[str]:
+        """将 Netscape Cookie 文件格式转换为 HTTP Cookie 格式"""
+        if not cookie_str:
+            return None
+        # 检测是否是 Netscape 格式（包含 "# Netscape" 或以 tab 分隔的多列格式）
+        if "# Netscape" in cookie_str or ("\t" in cookie_str and cookie_str.count("\t") > 3):
+            cookies = []
+            # 使用正则表达式匹配 Netscape cookie 行
+            # 格式: domain\tFLAG\tpath\tSECURE\texpiration\tname\tvalue
+            # 匹配以域名开头的 cookie 行（.domain.com 或 www.domain.com 或 domain.com）
+            pattern = r'([.\w-]+\.(?:com|cn|net|org|io))\t(TRUE|FALSE)\t([^\t]+)\t(TRUE|FALSE)\t(\d+)\t([^\t\s]+)\t([^\t\s]*)'
+            matches = re.findall(pattern, cookie_str)
+            for match in matches:
+                # match: (domain, flag, path, secure, expiration, name, value)
+                name = match[5].strip()
+                value = match[6].strip() if len(match) > 6 else ""
+                # 跳过空名称
+                if name and name != "":
+                    cookies.append(f"{name}={value}")
+            return "; ".join(cookies) if cookies else None
+        # 已经是 HTTP Cookie 格式
+        return cookie_str
+
+    @staticmethod
     def find_url(string: str) -> list:
-        url = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', string)
+        url = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', string)
         return url
 
     def extract_video_id(self, url: str) -> str:
@@ -179,7 +204,6 @@ class DouyinDownloader(Downloader):
 
     def fetch_video_info(self, video_url: str) -> json:
         try:
-
             aweme_id = self.extract_video_id(video_url)
             kwargs = self.headers_config
             print("@kwargs:", kwargs)
@@ -196,7 +220,6 @@ class DouyinDownloader(Downloader):
             full_url = f"{DOUYIN_DOMAIN}/aweme/v1/web/aweme/detail/?{query_str}&a_bogus={a_bogus}"
 
             print("Request URL:", full_url)
-
 
             response = requests.get(full_url, headers=kwargs)
 
@@ -253,7 +276,8 @@ class DouyinDownloader(Downloader):
                 raw_info={
                     'tags': video_data['aweme_detail']['caption'] + ''.join(tags),
                 },
-                video_path=None  # ❗音频下载不包含视频路径
+                video_path=None,  # ❗音频下载不包含视频路径
+                video_url=video_url  # 保存原始视频链接
             )
         except Exception as e:
             raise e

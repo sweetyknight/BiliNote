@@ -37,6 +37,7 @@ class BcutTranscriber(Transcriber):
     }
 
     def __init__(self):
+        logger.info("初始化 BcutTranscriber (B站必剪语音识别)")
         self.session = requests.Session()
         self.task_id = None
         self.__etags = []
@@ -51,11 +52,15 @@ class BcutTranscriber(Transcriber):
         self.__etags: List[str] = []
         self.__download_url: Optional[str] = None
         self.task_id: Optional[str] = None
+        logger.info("BcutTranscriber 初始化完成")
         
     def _load_file(self, file_path: str) -> bytes:
         """读取文件内容"""
+        logger.debug(f"读取文件: {file_path}")
         with open(file_path, 'rb') as f:
-            return f.read()
+            data = f.read()
+            logger.debug(f"文件读取完成, 大小: {len(data) / (1024*1024):.2f} MB")
+            return data
 
     def _upload(self, file_path: str) -> None:
         """申请上传"""
@@ -125,7 +130,7 @@ class BcutTranscriber(Transcriber):
         )
         resp.raise_for_status()
         resp = resp.json()
-        print('Bili',resp)
+        logger.debug(f'Bili 上传提交响应: {resp}')
         if resp.get("code") != 0:
             error_msg = f"上传提交失败: {resp.get('message', '未知错误')}"
             logger.error(error_msg)
@@ -170,62 +175,74 @@ class BcutTranscriber(Transcriber):
     def transcript(self, file_path: str) -> TranscriptResult:
         """执行识别过程，符合 Transcriber 接口"""
         try:
-            logger.info(f"开始处理文件: {file_path}")
-            
+            logger.info(f"[Bcut] 开始处理文件: {file_path}")
+
+            # 检查文件是否存在
+            import os
+            if not os.path.exists(file_path):
+                logger.error(f"[Bcut] 文件不存在: {file_path}")
+                raise FileNotFoundError(f"文件不存在: {file_path}")
+
+            file_size = os.path.getsize(file_path)
+            logger.info(f"[Bcut] 文件大小: {file_size / (1024*1024):.2f} MB")
+
             # 上传文件
-            logger.info("正在上传文件...")
+            logger.info("[Bcut] 正在上传文件到B站服务器...")
             self._upload(file_path)
-            
+
             # 创建任务
-            logger.info("提交转录任务...")
+            logger.info("[Bcut] 提交转录任务...")
             self._create_task()
-            
+
             # 轮询检查任务状态
-            logger.info("等待转录结果...")
+            logger.info("[Bcut] 等待转录结果...")
             task_resp = None
             max_retries = 500
             for i in range(max_retries):
                 task_resp = self._query_result()
-                
+
                 if task_resp["state"] == 4:  # 完成状态
+                    logger.info(f"[Bcut] 转录任务完成 (第 {i+1} 次查询)")
                     break
                 elif task_resp["state"] == 3:  # 失败状态
                     error_msg = f"B站ASR任务失败，状态码: {task_resp['state']}"
-                    logger.error(error_msg)
+                    logger.error(f"[Bcut] {error_msg}")
                     raise Exception(error_msg)
-                    
+
                 # 每隔一段时间打印进度
                 if i % 10 == 0:
-                    logger.info(f"转录进行中... {i}/{max_retries}")
-                    
+                    logger.info(f"[Bcut] 转录进行中... 第 {i+1}/{max_retries} 次查询, 状态: {task_resp.get('state', 'unknown')}")
+
                 time.sleep(1)
-                
+
             if not task_resp or task_resp["state"] != 4:
                 error_msg = f"B站ASR任务未能完成，状态: {task_resp.get('state') if task_resp else 'Unknown'}"
-                logger.error(error_msg)
+                logger.error(f"[Bcut] {error_msg}")
                 raise Exception(error_msg)
-                
+
             # 解析结果
-            logger.info("转录成功，处理结果...")
+            logger.info("[Bcut] 转录成功，处理结果...")
             result_json = json.loads(task_resp["result"])
-            
+
             # 提取分段数据
             segments = []
             full_text = ""
-            
+
             for u in result_json.get("utterances", []):
                 text = u.get("transcript", "").strip()
                 # B站ASR返回的时间戳是毫秒，需要转换为秒
                 start_time = float(u.get("start_time", 0)) / 1000.0
                 end_time = float(u.get("end_time", 0)) / 1000.0
-                
+
                 full_text += text + " "
                 segments.append(TranscriptSegment(
                     start=start_time,
                     end=end_time,
                     text=text
                 ))
-            
+
+            logger.info(f"[Bcut] 转录完成: 共 {len(segments)} 个片段, 总文本长度 {len(full_text)} 字符")
+
             # 创建结果对象
             result = TranscriptResult(
                 language=result_json.get("language", "zh"),
@@ -233,14 +250,11 @@ class BcutTranscriber(Transcriber):
                 segments=segments,
                 raw=result_json
             )
-            
-            # 触发完成事件
-            # self.on_finish(file_path, result)
-            
+
             return result
-            
+
         except Exception as e:
-            logger.error(f"B站ASR处理失败: {str(e)}")
+            logger.error(f"[Bcut] B站ASR处理失败: {str(e)}", exc_info=True)
             raise
 
     def on_finish(self, video_path: str, result: TranscriptResult) -> None:

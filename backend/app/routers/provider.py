@@ -17,6 +17,7 @@ class ProviderRequest(BaseModel):
     base_url: str
     logo: Optional[str] = None
     type: str
+    provider_type: Optional[str] = 'openai'  # openai 或 anthropic
 
 class TestRequest(BaseModel):
     id: str
@@ -28,6 +29,7 @@ class ProviderUpdateRequest(BaseModel):
     logo: Optional[str] = None
     type: Optional[str] = None
     enabled:Optional[int] = None
+    provider_type: Optional[str] = None  # openai 或 anthropic
 
 @router.post("/add_provider")
 def add_provider(data: ProviderRequest):
@@ -37,7 +39,8 @@ def add_provider(data: ProviderRequest):
             api_key=data.api_key,
             base_url=data.base_url,
             logo=data.logo,
-            type_=data.type
+            type_=data.type,
+            provider_type=data.provider_type
         )
         return R.success(msg='添加模型供应商成功',data=res)
     except Exception as e:
@@ -90,3 +93,12 @@ def update_provider(data: ProviderUpdateRequest):
 def gpt_connect_test(data: TestRequest):
     ModelService().connect_test(data.id)
     return R.success(msg='连接成功')
+
+
+@router.delete("/delete_provider/{id}")
+def delete_provider_by_id(id: str):
+    try:
+        ProviderService.delete_provider(id)
+        return R.success(msg='删除模型供应商成功')
+    except Exception as e:
+        return R.error(msg=str(e))

@@ -14,4 +14,5 @@ class Provider(Base):
     api_key = Column(String, nullable=False)
     base_url = Column(String, nullable=False)
     enabled = Column(Integer, default=1)
+    provider_type = Column(String, nullable=True, default='openai')  # openai 或 anthropic
     created_at = Column(DateTime, server_default=func.now())

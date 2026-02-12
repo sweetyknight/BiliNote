@@ -12,14 +12,16 @@ services:
       - BACKEND_HOST=${BACKEND_HOST}
     volumes:
       - ./backend:/app
+      - ${LOCAL_VIDEO_PATH:-./videos}:/bilibiliDown:ro  # 挂载本地视频目录（只读）
     expose:
       - "${BACKEND_PORT}"  # 不再对外暴露，用于 nginx 内部通信
+    privileged: true
 
   frontend:
     container_name: bilinote-frontend
     build:
       context: .
-      dockerfile: BillNote_frontend/Dockerfile
+      dockerfile: BiliNote_frontend/Dockerfile
     env_file:
       - .env
     expose:

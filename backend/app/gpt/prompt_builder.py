@@ -1,5 +1,23 @@
-from app.gpt.prompt import BASE_PROMPT
+"""
+Prompt 构建器
+负责根据用户选项组装完整的 prompt
+"""
+from app.gpt.prompt import (
+    BASE_PROMPT, 
+    SYSTEM_PROMPT,
+    SYSTEM_PROMPT_MULTIMODAL,
+    STYLE_MAP, 
+    FORMAT_MAP,
+    VISUAL_TEXT_EXTRACTION,
+    VISUAL_TEXT_CODE,
+    VISUAL_TEXT_ACADEMIC,
+    VISUAL_TEXT_LIGHT,
+)
+from app.utils.logger import get_logger
 
+logger = get_logger(__name__)
+
+# 格式选项定义
 note_formats = [
     {'label': '目录', 'value': 'toc'},
     {'label': '原片跳转', 'value': 'link'},
@@ -7,11 +25,12 @@ note_formats = [
     {'label': 'AI总结', 'value': 'summary'}
 ]
 
+# 风格选项定义
 note_styles = [
     {'label': '精简', 'value': 'minimal'},
     {'label': '详细', 'value': 'detailed'},
     {'label': '学术', 'value': 'academic'},
-    {"label": '教程',"value": 'tutorial', },
+    {"label": '教程', "value": 'tutorial'},
     {'label': '小红书', 'value': 'xiaohongshu'},
     {'label': '生活向', 'value': 'life_journal'},
     {'label': '任务导向', 'value': 'task_oriented'},
@@ -20,96 +39,199 @@ note_styles = [
 ]
 
 
-# 生成 BASE_PROMPT 函数
-def generate_base_prompt(title, segment_text, tags, _format=None, style=None, extras=None):
-    # 生成 Base Prompt 开头部分
+# 图片 detail 配置
+# - "auto": GPT 自动选择，适合需要识别文字/代码的场景（765-1105 tokens/张）
+# - "low": 固定低分辨率，适合只需理解大致内容的场景（85 tokens/张）
+# - "high": 强制高分辨率，适合需要精细分析的场景
+
+# 需要高分辨率识别细节的风格（教程、学术、详细笔记等）
+HIGH_DETAIL_STYLES = {'tutorial', 'detailed', 'academic', 'task_oriented'}
+
+# 只需理解大致内容的风格（生活向、小红书、精简等）
+LOW_DETAIL_STYLES = {'life_journal', 'xiaohongshu', 'minimal'}
+
+# 中等需求的风格（商业、会议纪要等），使用 auto
+AUTO_DETAIL_STYLES = {'business', 'meeting_minutes'}
+
+
+def get_image_detail_for_style(style: str, has_screenshot_format: bool = False) -> str:
+    """
+    根据笔记风格和格式选项，决定图片的 detail 参数
+    
+    :param style: 笔记风格（如 'tutorial', 'life_journal' 等）
+    :param has_screenshot_format: 是否启用了截图功能（需要精确时间点识别）
+    :return: "auto" | "low" | "high"
+    
+    策略说明：
+    - 教程/学术/详细风格 → auto（需要识别代码、公式、图表）
+    - 生活向/小红书/精简风格 → low（只需理解场景，节省成本）
+    - 启用截图功能 → 至少 auto（需要准确识别时间戳）
+    """
+    # 如果启用了截图功能，需要能识别时间戳，至少用 auto
+    if has_screenshot_format:
+        if style in LOW_DETAIL_STYLES:
+            logger.info(f"[ImageDetail] 风格 '{style}' 原本使用 low，但因启用截图功能，升级为 auto")
+            return "auto"
+    
+    if style in HIGH_DETAIL_STYLES:
+        logger.info(f"[ImageDetail] 风格 '{style}' 需要识别细节，使用 auto")
+        return "auto"
+    elif style in LOW_DETAIL_STYLES:
+        logger.info(f"[ImageDetail] 风格 '{style}' 只需大致理解，使用 low 节省成本")
+        return "low"
+    else:
+        # 默认使用 auto
+        logger.info(f"[ImageDetail] 风格 '{style}' 使用默认 auto")
+        return "auto"
+
+
+def get_system_prompt(has_images: bool = False) -> str:
+    """
+    获取系统角色 prompt
+    
+    :param has_images: 是否包含图片输入（多模态模式）
+    :return: 系统 prompt
+    """
+    if has_images:
+        logger.info("[PromptBuilder] 多模态模式：使用增强视觉理解的系统提示词")
+        return SYSTEM_PROMPT_MULTIMODAL
+    return SYSTEM_PROMPT
+
+
+# 视觉文字提取级别映射
+# 高级提取：代码/教程类
+CODE_VISUAL_STYLES = {'tutorial'}
+# 学术提取：学术/详细/商业
+ACADEMIC_VISUAL_STYLES = {'academic', 'detailed', 'business', 'task_oriented', 'meeting_minutes'}
+# 轻量提取：生活向/小红书
+LIGHT_VISUAL_STYLES = {'life_journal', 'xiaohongshu', 'minimal'}
+
+
+def get_visual_extraction_prompt(style: str) -> str:
+    """
+    根据笔记风格返回对应的视觉文字提取提示词
+    
+    :param style: 笔记风格
+    :return: 视觉提取相关的 prompt 片段
+    """
+    if style in CODE_VISUAL_STYLES:
+        logger.info(f"[PromptBuilder] 风格 '{style}' 使用代码增强视觉提取")
+        return VISUAL_TEXT_EXTRACTION + VISUAL_TEXT_CODE
+    elif style in ACADEMIC_VISUAL_STYLES:
+        logger.info(f"[PromptBuilder] 风格 '{style}' 使用学术增强视觉提取")
+        return VISUAL_TEXT_EXTRACTION + VISUAL_TEXT_ACADEMIC
+    elif style in LIGHT_VISUAL_STYLES:
+        logger.info(f"[PromptBuilder] 风格 '{style}' 使用轻量视觉提取")
+        return VISUAL_TEXT_LIGHT
+    else:
+        # 默认使用通用视觉提取
+        logger.info(f"[PromptBuilder] 风格 '{style}' 使用通用视觉提取")
+        return VISUAL_TEXT_EXTRACTION
+
+
+def generate_base_prompt(
+    title: str, 
+    segment_text: str, 
+    tags: list, 
+    _format: list = None, 
+    style: str = None, 
+    extras: str = None,
+    has_images: bool = False
+) -> str:
+    """
+    生成完整的用户 prompt
+    
+    :param title: 视频标题
+    :param segment_text: 格式化的转录文本
+    :param tags: 视频标签
+    :param _format: 格式选项列表，如 ['toc', 'link', 'screenshot', 'summary']
+    :param style: 笔记风格
+    :param extras: 用户额外的自定义要求
+    :param has_images: 是否包含视频帧图片（启用视觉文字提取）
+    :return: 完整的 prompt 字符串
+    """
+    logger.debug(f"[PromptBuilder] 生成 prompt: title={title}, format={_format}, style={style}, has_images={has_images}")
+    logger.debug(f"[PromptBuilder] segment_text 长度: {len(segment_text) if segment_text else 0} 字符")
+
+    # 处理标签格式
+    tags_str = ', '.join(tags) if tags else '无'
+    
+    # 生成基础 prompt
     prompt = BASE_PROMPT.format(
-        video_title=title,
+        video_title=title or '未知标题',
         segment_text=segment_text,
-        tags=tags
+        tags=tags_str
     )
 
-    # 添加用户选择的格式
+    # 如果有图片，添加视觉文字提取提示
+    if has_images:
+        logger.info(f"[PromptBuilder] 检测到图片输入，启用视觉文字提取增强")
+        visual_prompt = get_visual_extraction_prompt(style or 'detailed')
+        prompt += visual_prompt
+
+    # 添加风格要求
+    if style and style in STYLE_MAP:
+        logger.debug(f"[PromptBuilder] 添加风格: {style}")
+        prompt += STYLE_MAP[style]
+    else:
+        # 默认使用详细风格
+        logger.debug(f"[PromptBuilder] 使用默认风格: detailed")
+        prompt += STYLE_MAP.get('detailed', '')
+
+    # 添加格式选项
     if _format:
-        prompt += "\n" + "\n".join([get_format_function(f) for f in _format])
+        logger.debug(f"[PromptBuilder] 添加格式选项: {_format}")
+        for fmt in _format:
+            if fmt in FORMAT_MAP:
+                prompt += FORMAT_MAP[fmt]
 
-    # 根据用户选择的笔记风格添加描述
-    if style:
-        prompt += "\n" + get_style_format(style)
-
-    # 添加额外内容
+    # 添加用户额外要求
     if extras:
-        prompt += f"\n{extras}"
+        logger.debug(f"[PromptBuilder] 添加额外要求")
+        prompt += f"\n### 📌 用户特殊要求\n{extras}\n"
+
+    # 添加最终提醒（根据是否有图片调整）
+    if has_images:
+        prompt += '''
+---
+
+## 🎯 开始生成
+
+你已收到视频的转录内容和关键帧截图。请：
+1. **结合音频转录和视觉内容**进行综合分析
+2. **提取画面中的文字信息**并融入笔记
+3. 直接输出高质量的 Markdown 笔记内容
+'''
+    else:
+        prompt += '''
+---
+
+## 🎯 开始生成
+
+现在，请根据以上要求，直接输出高质量的 Markdown 笔记内容。
+'''
+
+    logger.info(f"[PromptBuilder] Prompt 生成完成，总长度: {len(prompt)} 字符")
     return prompt
 
 
-# 获取格式函数
-def get_format_function(format_type):
-    format_map = {
-        'toc': get_toc_format,
-        'link': get_link_format,
-        'screenshot': get_screenshot_format,
-        'summary': get_summary_format
-    }
-    return format_map.get(format_type, lambda: '')()
+def estimate_tokens(text: str) -> int:
+    """
+    估算文本的 token 数量（粗略估计）
+    中文约 1.5-2 个字符一个 token，英文约 4 个字符一个 token
+    """
+    # 简单估算：假设平均 2 个字符一个 token
+    return len(text) // 2
 
 
-# 风格描述的处理
-def get_style_format(style):
-    style_map = {
-        'minimal': '1. **精简信息**: 仅记录最重要的内容，简洁明了。',
-        'detailed': '2. **详细记录**: 包含完整的内容和每个部分的详细讨论。需要尽可能多的记录视频内容，最好详细的笔记',
-        'academic': '3. **学术风格**: 适合学术报告，正式且结构化。',
-        'xiaohongshu': '''4. **小红书风格**: 
-### 擅长使用下面的爆款关键词：
-好用到哭，大数据，教科书般，小白必看，宝藏，绝绝子神器，都给我冲,划重点，笑不活了，YYDS，秘方，我不允许，压箱底，建议收藏，停止摆烂，上天在提醒你，挑战全网，手把手，揭秘，普通女生，沉浸式，有手就能做吹爆，好用哭了，搞钱必看，狠狠搞钱，打工人，吐血整理，家人们，隐藏，高级感，治愈，破防了，万万没想到，爆款，永远可以相信被夸爆手残党必备，正确姿势
-
-### 采用二极管标题法创作标题：
-- 正面刺激法:产品或方法+只需1秒 (短期)+便可开挂（逆天效果）
-- 负面刺激法:你不XXX+绝对会后悔 (天大损失) +(紧迫感)
-利用人们厌恶损失和负面偏误的心理
-
-### 写作技巧
-1. 使用惊叹号、省略号等标点符号增强表达力，营造紧迫感和惊喜感。
-2. **使用emoji表情符号，来增加文字的活力**
-3. 采用具有挑战性和悬念的表述，引发读、“无敌者好奇心，例如“暴涨词汇量”了”、“拒绝焦虑”等
-4. 利用正面刺激和负面激，诱发读者的本能需求和动物基本驱动力，如“离离原上谱”、“你不知道的项目其实很赚”等
-5. 融入热点话题和实用工具，提高文章的实用性和时效性，如“2023年必知”、“chatGPT狂飙进行时”等
-6. 描述具体的成果和效果，强调标题中的关键词，使其更具吸引力，例如“英语底子再差，搞清这些语法你也能拿130+”
-7. 使用吸引人的标题：''',
-
-        'life_journal': '5. **生活向**: 记录个人生活感悟，情感化表达。',
-        'task_oriented': '6. **任务导向**: 强调任务、目标，适合工作和待办事项。',
-        'business': '7. **商业风格**: 适合商业报告、会议纪要，正式且精准。',
-        'meeting_minutes': '8. **会议纪要**: 适合商业报告、会议纪要，正式且精准。',
-        "tutorial":"9.**教程笔记**:尽可能详细的记录教程,特别是关键点和一些重要的结论步骤"
-    }
-    return style_map.get(style, '')
-
-
-# 格式化输出内容
-def get_toc_format():
-    return '''
-    9. **目录**: 自动生成一个基于 `##` 级标题的目录。不需要插入原片跳转
-    '''
-
-
-def get_link_format():
-    return '''
-    10. **原片跳转**: 为每个主要章节添加时间戳，使用格式 `*Content-[mm:ss]`。 
-    重要：**始终**在章节标题前加上 `*Content` 前缀，例如：`AI 的发展史 *Content-[01:23]`。一定是标题在前 插入标记在后
-    '''
-
-
-def get_screenshot_format():
-    return '''
-11. **原片截图**:你收到的截图一般是一个网格，网格的每张图片就是一个时间点，左上角会包含时间mm:ss的格式，请你结合我发你的图片插入截图提示，请你帮助用户更好的理解视频内容，请你认真的分析每个图片和对应的转写文案，插入最合适的内容来备注用户理解，请一定按照这个格式 返回否则系统无法解析：
-- 格式：`*Screenshot-[mm:ss]`
-
-    '''
-
-
-def get_summary_format():
-    return '''
-    12. **AI总结**: 在笔记末尾加入简短的AI生成总结,并且二级标题 就是 AI 总结 例如 ## AI 总结。
-    '''
+def should_use_chunking(segment_text: str, max_tokens: int = 6000) -> bool:
+    """
+    判断是否需要分段处理
+    
+    :param segment_text: 转录文本
+    :param max_tokens: 单次处理的最大 token 数
+    :return: 是否需要分段
+    """
+    estimated = estimate_tokens(segment_text)
+    logger.debug(f"[PromptBuilder] 估算 token 数: {estimated}, 阈值: {max_tokens}")
+    return estimated > max_tokens

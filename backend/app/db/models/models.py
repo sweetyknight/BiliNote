@@ -9,4 +9,5 @@ class Model(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     provider_id = Column(Integer, nullable=False)
     model_name = Column(String, nullable=False)
+    model_type = Column(String, nullable=False, default='llm')  # 'llm' 或 'transcriber'
     created_at = Column(DateTime, server_default=func.now())

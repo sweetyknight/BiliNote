@@ -10,6 +10,7 @@ from app.db.provider_dao import (
     update_provider,
     delete_provider, get_enabled_providers,
 )
+from app.db.model_dao import delete_models_by_provider
 from app.gpt.gpt_factory import GPTFactory
 from app.models.model_config import ModelConfig
 
@@ -29,14 +30,8 @@ class ProviderService:
             "enabled": row.get("enabled"),
             "base_url": row.get("base_url"),
             "api_key": row.get("api_key"),
+            "provider_type": row.get("provider_type"),
             "created_at": jsonable_encoder(row.get("created_at")),
-            # "name": row[1],
-            # "logo": row[2],
-            # "type": row[3],
-            # "api_key": row[4],
-            # "base_url": row[5],
-            # "enabled": row[6],
-            # "created_at": row[7],
         }
     @staticmethod
     def serialize_provider_safe(row: Provider) -> dict:
@@ -52,16 +47,8 @@ class ProviderService:
             "enabled": row.get("enabled"),
             "base_url": row.get("base_url"),
             "api_key":  ProviderService.mask_key(row.get("api_key")),
+            "provider_type": row.get("provider_type"),
             "created_at": jsonable_encoder(row.get("created_at")),
-
-            # "id": row[0],
-            # "name": row[1],
-            # "logo": row[2],
-            # "type": row[3],
-            # "api_key": ProviderService.mask_key(row[4]),
-            # "base_url": row[5],
-            # "enabled": row[6],
-            # "created_at": row[7],
         }
     @staticmethod
     def mask_key(key: str) -> str:
@@ -69,11 +56,11 @@ class ProviderService:
             return '*' * len(key)
         return key[:4] + '*' * (len(key) - 8) + key[-4:]
     @staticmethod
-    def add_provider( name: str, api_key: str, base_url: str, logo: str, type_: str, enabled: int = 1):
+    def add_provider( name: str, api_key: str, base_url: str, logo: str, type_: str, enabled: int = 1, provider_type: str = 'openai'):
         try:
             id = uuid().lower()
             logo='custom'
-            return insert_provider(id, name, api_key, base_url, logo, type_, enabled)
+            return insert_provider(id, name, api_key, base_url, logo, type_, enabled, provider_type)
         except Exception as  e:
             print('创建模式失败',e)
     @staticmethod
@@ -86,6 +73,7 @@ class ProviderService:
             "api_key": p.api_key,
             "base_url": p.base_url,
             "enabled": p.enabled,
+            "provider_type": getattr(p, 'provider_type', 'openai'),
             "created_at": p.created_at,
         }
     @staticmethod
@@ -131,4 +119,7 @@ class ProviderService:
 
     @staticmethod
     def delete_provider(id: str):
+        # 先删除该供应商下的所有模型
+        delete_models_by_provider(id)
+        # 再删除供应商
         return delete_provider(id)

@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-
 RUN rm -f /etc/apt/sources.list && \
     rm -rf /etc/apt/sources.list.d/* && \
     echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
@@ -10,14 +9,16 @@ RUN rm -f /etc/apt/sources.list && \
     apt-get install -y ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-# 确保 PATH 中包含 ffmpeg 路径（可选）
 ENV PATH="/usr/bin:${PATH}"
-
-# 设置 Hugging Face 镜像源环境变量
 ENV HF_ENDPOINT=https://hf-mirror.com
 
 WORKDIR /app
-COPY ./backend /app
+
+# 先复制依赖文件并安装（利用Docker层缓存）
+COPY ./backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+
+# 再复制源代码（代码变更不会触发重新安装依赖）
+COPY ./backend /app
 
 CMD ["python", "main.py"]

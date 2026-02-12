@@ -34,6 +34,10 @@ class RecordRequest(BaseModel):
     platform: str
 
 
+class DeleteTaskRequest(BaseModel):
+    task_id: str
+
+
 class VideoRequest(BaseModel):
     video_url: str
     platform: str
@@ -78,42 +82,82 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
                   video_interval=0, grid_size=[]
                   ):
+    """
+    后台任务：执行笔记生成
+    """
+    try:
+        logger.info(f"[后台任务] 开始执行笔记生成任务: task_id={task_id}")
 
-    if not model_name or not provider_id:
-        raise HTTPException(status_code=400, detail="请选择模型和提供者")
+        if not model_name or not provider_id:
+            logger.error(f"[后台任务] 参数错误: model_name={model_name}, provider_id={provider_id}")
+            raise HTTPException(status_code=400, detail="请选择模型和提供者")
 
-    note = NoteGenerator().generate(
-        video_url=video_url,
-        platform=platform,
-        quality=quality,
-        task_id=task_id,
-        model_name=model_name,
-        provider_id=provider_id,
-        link=link,
-        _format=_format,
-        style=style,
-        extras=extras,
-        screenshot=screenshot
-        , video_understanding=video_understanding,
-        video_interval=video_interval,
-        grid_size=grid_size
-    )
-    logger.info(f"Note generated: {task_id}")
-    if not note or not note.markdown:
-        logger.warning(f"任务 {task_id} 执行失败，跳过保存")
-        return
-    save_note_to_file(task_id, note)
+        note = NoteGenerator().generate(
+            video_url=video_url,
+            platform=platform,
+            quality=quality,
+            task_id=task_id,
+            model_name=model_name,
+            provider_id=provider_id,
+            link=link,
+            _format=_format,
+            style=style,
+            extras=extras,
+            screenshot=screenshot,
+            video_understanding=video_understanding,
+            video_interval=video_interval,
+            grid_size=grid_size
+        )
+
+        logger.info(f"[后台任务] 笔记生成完成: task_id={task_id}")
+
+        if not note or not note.markdown:
+            logger.warning(f"[后台任务] 任务 {task_id} 执行失败，跳过保存")
+            return
+
+        save_note_to_file(task_id, note)
+        logger.info(f"[后台任务] 笔记已保存到文件: task_id={task_id}")
+
+    except Exception as e:
+        logger.error(f"[后台任务] 任务执行失败 (task_id={task_id}): {e}", exc_info=True)
+        # 确保状态文件被更新为失败
+        try:
+            from app.enmus.task_status_enums import TaskStatus
+            NoteGenerator()._update_status(task_id, TaskStatus.FAILED, message=str(e))
+        except Exception as update_error:
+            logger.error(f"[后台任务] 更新失败状态时出错: {update_error}")
 
 
 
 @router.post('/delete_task')
-def delete_task(data: RecordRequest):
+def delete_task(data: DeleteTaskRequest):
+    """
+    删除指定任务的所有相关文件
+    """
     try:
-        # TODO: 待持久化完成
-        # NoteGenerator().delete_note(video_id=data.video_id, platform=data.platform)
-        return R.success(msg='删除成功')
+        task_id = data.task_id
+        deleted_files = []
+        
+        # 定义需要删除的文件
+        files_to_delete = [
+            os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json"),           # 结果文件
+            os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.status.json"),    # 状态文件
+        ]
+        
+        for file_path in files_to_delete:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                deleted_files.append(file_path)
+                logger.info(f"已删除文件: {file_path}")
+        
+        if deleted_files:
+            return R.success(msg=f'删除成功，共删除 {len(deleted_files)} 个文件')
+        else:
+            return R.success(msg='任务不存在或已被删除')
+            
     except Exception as e:
-        return R.error(msg=e)
+        logger.error(f"删除任务失败: {e}")
+        return R.error(msg=str(e))
 
 
 @router.post("/upload")
@@ -171,6 +215,8 @@ def get_task_status(task_id: str):
 
         status = status_content.get("status")
         message = status_content.get("message", "")
+        details = status_content.get("details", {})
+        updated_at = status_content.get("updated_at", "")
 
         if status == TaskStatus.SUCCESS.value:
             # 成功状态的话，继续读取最终笔记内容
@@ -181,6 +227,8 @@ def get_task_status(task_id: str):
                     "status": status,
                     "result": result_content,
                     "message": message,
+                    "details": details,
+                    "updated_at": updated_at,
                     "task_id": task_id
                 })
             else:
@@ -192,12 +240,20 @@ def get_task_status(task_id: str):
                 })
 
         if status == TaskStatus.FAILED.value:
-            return R.error(message or "任务失败", code=500)
+            return R.success({
+                "status": status,
+                "message": message or "任务失败",
+                "details": details,
+                "updated_at": updated_at,
+                "task_id": task_id
+            })
 
         # 处理中状态
         return R.success({
             "status": status,
             "message": message,
+            "details": details,
+            "updated_at": updated_at,
             "task_id": task_id
         })
 
@@ -244,3 +300,101 @@ async def image_proxy(request: Request, url: str):
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/note_history")
+def get_note_history():
+    """
+    获取所有已完成的笔记历史记录
+    扫描 note_results 目录，返回所有已完成任务的信息
+    """
+    import re
+    from datetime import datetime
+    
+    notes = []
+    uuid_pattern = re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.json$')
+    
+    try:
+        # 扫描 note_results 目录
+        if not os.path.exists(NOTE_OUTPUT_DIR):
+            return R.success([])
+        
+        for filename in os.listdir(NOTE_OUTPUT_DIR):
+            # 只处理主结果文件（不含 _audio, _transcript, _markdown 等后缀）
+            if not uuid_pattern.match(filename):
+                continue
+            
+            task_id = filename.replace('.json', '')
+            result_path = os.path.join(NOTE_OUTPUT_DIR, filename)
+            status_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.status.json")
+            
+            # 检查状态是否为成功
+            if os.path.exists(status_path):
+                try:
+                    with open(status_path, "r", encoding="utf-8") as f:
+                        status_data = json.load(f)
+                    if status_data.get("status") != "SUCCESS":
+                        continue
+                except:
+                    continue
+            else:
+                continue
+            
+            # 读取结果文件
+            try:
+                with open(result_path, "r", encoding="utf-8") as f:
+                    result_data = json.load(f)
+                
+                # 获取文件修改时间作为创建时间
+                file_stat = os.stat(result_path)
+                created_at = datetime.fromtimestamp(file_stat.st_mtime).isoformat()
+                
+                # 构建返回数据
+                audio_meta = result_data.get("audio_meta", {})
+                transcript = result_data.get("transcript", {})
+                markdown = result_data.get("markdown", "")
+
+                # 获取平台信息
+                platform = audio_meta.get("platform", "local")
+                # 获取本地文件路径
+                file_path = audio_meta.get("file_path", "")
+                # 获取原始视频URL
+                original_video_url = audio_meta.get("video_url")
+                
+                # 优先使用本地文件路径（如果存在），这样重新生成时可以跳过下载
+                # 只有当本地文件不存在时，才使用原始 URL
+                if file_path and os.path.exists(file_path):
+                    # 本地文件存在，使用本地路径
+                    form_video_url = file_path
+                elif original_video_url:
+                    # 本地文件不存在，使用原始URL重新下载
+                    form_video_url = original_video_url
+                else:
+                    # 既没有本地文件也没有原始URL，使用文件路径供参考
+                    form_video_url = file_path
+                
+                notes.append({
+                    "id": task_id,
+                    "status": "SUCCESS",
+                    "markdown": markdown,
+                    "transcript": transcript,
+                    "audioMeta": audio_meta,
+                    "createdAt": created_at,
+                    "platform": platform,
+                    "formData": {
+                        "video_url": form_video_url,
+                        "platform": platform,
+                    }
+                })
+            except Exception as e:
+                logger.warning(f"读取结果文件失败 {filename}: {e}")
+                continue
+        
+        # 按创建时间倒序排列（最新的在前）
+        notes.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+        
+        return R.success(notes)
+    
+    except Exception as e:
+        logger.error(f"获取笔记历史失败: {e}")
+        return R.error(str(e))

@@ -50,7 +50,8 @@ class KuaiShouDownloader(Downloader, ABC):
                 raw_info={
                     'tags': ','.join(tag['name'] for tag in video_raw_info.get('tags', []) if tag.get('name'))
                 },
-                video_path=mp4_path
+                video_path=mp4_path,
+                video_url=video_url  # 保存原始视频链接
             )
 
         # 下载 mp4 视频
@@ -80,7 +81,8 @@ class KuaiShouDownloader(Downloader, ABC):
             raw_info={
                 'tags': ','.join(tag['name'] for tag in video_raw_info.get('tags', []) if tag.get('name'))
             },
-            video_path=mp4_path
+            video_path=mp4_path,
+            video_url=video_url  # 保存原始视频链接
         )
 
     def download_video(

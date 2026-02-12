@@ -12,4 +12,5 @@ class AudioDownloadResult:
     video_id: str                # 唯一视频ID
     raw_info: dict               # yt-dlp 的原始 info 字典
     video_path: Optional[str] = None  #  新增字段：可选视频文件路径
+    video_url: Optional[str] = None   # 原始视频链接（用于重新生成时恢复）
 

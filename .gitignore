@@ -322,3 +322,22 @@ cython_debug/
 /backend/config/*
 /BiliNote_frontend/.idea/*
 /BiliNote_frontend/src-tauri/bin/
+/BiliNote_frontend/src-tauri/target/
+/BiliNote_frontend/dist/
+/BiliNote_frontend/frontend.log
+
+# Rust / Tauri
+**/target/
+**/*.rs.bk
+
+# IDE 配置
+.cursor/
+.vscode/
+.claude/
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+nul

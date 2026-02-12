@@ -82,15 +82,14 @@ def get_transcriber(transcriber_type="fast-whisper", model_size="base", device="
     返回:
         对应类型的转录器实例
     """
-    logger.info(f'请求转录器类型: {transcriber_type}')
+    whisper_model_size = os.environ.get("WHISPER_MODEL_SIZE", model_size)
+    logger.info(f'[转录器] 请求转录器类型: {transcriber_type}, model_size={whisper_model_size}, device={device}')
 
     try:
         transcriber_enum = TranscriberType(transcriber_type)
     except ValueError:
         logger.warning(f'未知转录器类型 "{transcriber_type}"，默认使用 fast-whisper')
         transcriber_enum = TranscriberType.FAST_WHISPER
-
-    whisper_model_size = os.environ.get("WHISPER_MODEL_SIZE", model_size)
 
     if transcriber_enum == TranscriberType.FAST_WHISPER:
         return get_whisper_transcriber(whisper_model_size, device=device)

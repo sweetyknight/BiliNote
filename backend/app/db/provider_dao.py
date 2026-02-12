@@ -49,13 +49,13 @@ def seed_default_providers():
         db.close()
 
 
-def insert_provider(id: str, name: str, api_key: str, base_url: str, logo: str, type_: str, enabled: int = 1):
+def insert_provider(id: str, name: str, api_key: str, base_url: str, logo: str, type_: str, enabled: int = 1, provider_type: str = 'openai'):
     db = next(get_db())
     try:
-        provider = Provider(id=id, name=name, api_key=api_key, base_url=base_url, logo=logo, type=type_, enabled=enabled)
+        provider = Provider(id=id, name=name, api_key=api_key, base_url=base_url, logo=logo, type=type_, enabled=enabled, provider_type=provider_type)
         db.add(provider)
         db.commit()
-        logger.info(f"Provider inserted successfully. id: {id}, name: {name}, type: {type_}")
+        logger.info(f"Provider inserted successfully. id: {id}, name: {name}, type: {type_}, provider_type: {provider_type}")
         return id
     except Exception as e:
         logger.error(f"Failed to insert provider: {e}")
@@ -119,11 +119,15 @@ def delete_provider(id: str):
     db = next(get_db())
     try:
         provider = db.query(Provider).filter_by(id=id).first()
-        if provider:
-            db.delete(provider)
-            db.commit()
-            logger.info(f"Provider deleted successfully. id: {id}")
+        if not provider:
+            raise ValueError(f"Provider {id} not found")
+        db.delete(provider)
+        db.commit()
+        logger.info(f"Provider deleted successfully. id: {id}")
+        return True
     except Exception as e:
+        db.rollback()
         logger.error(f"Failed to delete provider: {e}")
+        raise e
     finally:
         db.close()

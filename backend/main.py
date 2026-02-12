@@ -1,4 +1,5 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -19,6 +20,24 @@ from events import register_handler
 from ffmpeg_helper import ensure_ffmpeg_or_raise
 
 logger = get_logger(__name__)
+
+
+class EndpointFilter(logging.Filter):
+    """过滤掉频繁轮询端点的访问日志"""
+    
+    # 需要过滤的路径关键词
+    FILTERED_PATHS = [
+        "/task_status/",
+        "/api/model_list",
+        "/api/note_history",
+        "/static/",
+        "/uploads/",
+    ]
+    
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        # 如果日志消息包含需要过滤的路径，则不记录
+        return not any(path in message for path in self.FILTERED_PATHS)
 load_dotenv()
 
 # 读取 .env 中的路径
@@ -47,7 +66,11 @@ async def lifespan(app: FastAPI):
 app = create_app(lifespan=lifespan)
 origins = [
     "http://localhost",
+    "http://localhost:3015",
+    "http://localhost:8080",
     "http://127.0.0.1",
+    "http://127.0.0.1:3015",
+    "http://127.0.0.1:8080",
     "http://tauri.localhost",
 ]
 
@@ -74,4 +97,8 @@ if __name__ == "__main__":
     port = int(os.getenv("BACKEND_PORT", 8483))
     host = os.getenv("BACKEND_HOST", "0.0.0.0")
     logger.info(f"Starting server on {host}:{port}")
+    
+    # 给 uvicorn 的访问日志添加过滤器
+    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+    
     uvicorn.run(app, host=host, port=port, reload=False)

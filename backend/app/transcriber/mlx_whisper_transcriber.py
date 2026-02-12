@@ -47,17 +47,28 @@ class MLXWhisperTranscriber(Transcriber):
 
     @timeit
     def transcript(self, file_path: str) -> TranscriptResult:
+        logger.info(f"[MLX Whisper] 开始转写音频文件: {file_path}")
         try:
+            # 检查文件是否存在
+            if not Path(file_path).exists():
+                logger.error(f"[MLX Whisper] 音频文件不存在: {file_path}")
+                raise FileNotFoundError(f"音频文件不存在: {file_path}")
+
+            file_size = Path(file_path).stat().st_size
+            logger.info(f"[MLX Whisper] 音频文件大小: {file_size / (1024*1024):.2f} MB")
+
             # 使用 MLX Whisper 进行转录
+            logger.info(f"[MLX Whisper] 调用 MLX Whisper 模型: {self.model_name}")
             result = mlx_whisper.transcribe(
                 file_path,
                 path_or_hf_repo=f"{self.model_name}"
             )
-            
+            logger.info(f"[MLX Whisper] 转写完成，检测到语言: {result.get('language', 'unknown')}")
+
             # 转换为标准格式
             segments = []
             full_text = ""
-            
+
             for segment in result["segments"]:
                 text = segment["text"].strip()
                 full_text += text + " "
@@ -66,19 +77,20 @@ class MLXWhisperTranscriber(Transcriber):
                     end=segment["end"],
                     text=text
                 ))
-            
+
+            logger.info(f"[MLX Whisper] 转写结果: 共 {len(segments)} 个片段, 总文本长度 {len(full_text)} 字符")
+
             transcript_result = TranscriptResult(
                 language=result.get("language", "unknown"),
                 full_text=full_text.strip(),
                 segments=segments,
                 raw=result
             )
-            
-            # self.on_finish(file_path, transcript_result)
+
             return transcript_result
-            
+
         except Exception as e:
-            logger.error(f"MLX Whisper 转写失败：{e}")
+            logger.error(f"[MLX Whisper] 转写失败：{e}", exc_info=True)
             raise e
 
     def on_finish(self, video_path: str, result: TranscriptResult) -> None:

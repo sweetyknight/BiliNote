@@ -5,10 +5,16 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-# 插入任务
+# 插入任务（如果 task_id 已存在则跳过）
 def insert_video_task(video_id: str, platform: str, task_id: str):
     db = next(get_db())
     try:
+        # 检查 task_id 是否已存在（支持重试场景）
+        existing = db.query(VideoTask).filter_by(task_id=task_id).first()
+        if existing:
+            logger.info(f"Task already exists, skipping insert. task_id: {task_id}")
+            return
+        
         task = VideoTask(video_id=video_id, platform=platform, task_id=task_id)
         db.add(task)
         db.commit()
